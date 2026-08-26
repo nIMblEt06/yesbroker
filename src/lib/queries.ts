@@ -1,6 +1,7 @@
 import "server-only";
 import postgres from "postgres";
 import { sql } from "./db";
+import { cached } from "./cache";
 import type { TaxonomyArea } from "./area-taxonomy";
 
 type DbParam = postgres.ParameterOrJSON<never>;
@@ -45,6 +46,11 @@ function qClause(q: string, params: DbParam[], p: (v: DbParam) => string): strin
 }
 
 export async function fetchFacetCounts(q: string): Promise<Record<string, number>> {
+  if (!q.trim()) return cached("facet-counts:empty", 60, () => loadFacetCounts(q));
+  return loadFacetCounts(q);
+}
+
+async function loadFacetCounts(q: string): Promise<Record<string, number>> {
   const params: DbParam[] = [];
   const p = (v: DbParam) => `$${params.push(v)}`;
   let where = "b.is_deleted = false and b.is_hidden = false";
@@ -67,6 +73,10 @@ export async function fetchFacetCounts(q: string): Promise<Record<string, number
 }
 
 export async function fetchAreaChips(): Promise<TaxonomyArea[]> {
+  return cached("area-chips", 300, loadAreaChips);
+}
+
+async function loadAreaChips(): Promise<TaxonomyArea[]> {
   const rows = await sql`
     select name, slug, aliases, kind, sort_order
     from areas
@@ -90,6 +100,24 @@ export interface BrokerFilters {
 }
 
 export async function fetchBrokers(
+  f: BrokerFilters
+): Promise<{ brokers: BrokerCardData[]; hasMore: boolean }> {
+  const isDefaultView = f.areaSlugs.length === 0 && !f.q.trim() && f.offset === 0;
+  if (isDefaultView) {
+    const result = await cached(`brokers:default:limit=${f.limit}`, 30, () => loadBrokers(f));
+    return {
+      hasMore: result.hasMore,
+      brokers: result.brokers.map((b) => ({
+        ...b,
+        firstAddedAt: new Date(b.firstAddedAt),
+        lastAddedAt: new Date(b.lastAddedAt),
+      })),
+    };
+  }
+  return loadBrokers(f);
+}
+
+async function loadBrokers(
   f: BrokerFilters
 ): Promise<{ brokers: BrokerCardData[]; hasMore: boolean }> {
   const params: DbParam[] = [];

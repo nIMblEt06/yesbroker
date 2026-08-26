@@ -1,15 +1,9 @@
 import "server-only";
 import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
+import { getRedis } from "./redis";
 
 declare global {
-  var __baRedis: Redis | undefined;
   var __baLimiters: Map<string, Ratelimit> | undefined;
-}
-
-function getRedis(): Redis {
-  globalThis.__baRedis ??= Redis.fromEnv();
-  return globalThis.__baRedis;
 }
 
 function getLimiter(bucket: string, limit: number, windowSeconds: number): Ratelimit {

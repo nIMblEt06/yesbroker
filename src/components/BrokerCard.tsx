@@ -19,6 +19,7 @@ import {
   IconSliders,
   IconUsers,
   IconHome,
+  IconSpinner,
 } from "@/components/icons";
 
 const REASONS = [
@@ -49,22 +50,28 @@ export function BrokerCard({ broker, waCtx }: Props) {
     setVoted(hasVoted(broker.id));
   }, [broker.id]);
   const [pending, startTransition] = useTransition();
+  const [voting, setVoting] = useState(false);
 
   const name = broker.displayName ?? "Broker";
   const { hasContacted } = useContact();
   const iContacted = hasContacted(broker.id);
   function onHelped() {
-    if (voted) return;
+    if (voted || voting) return;
+    setVoting(true);
     startTransition(async () => {
-      const res = await voteHelpful(broker.id);
-      markVoted(broker.id);
-      setVoted(true);
-      if (res.counted) {
-        setVotes(res.votes ?? votes + 1);
-        toast("Counted. Thanks!");
-      } else {
-        if (typeof res.votes === "number") setVotes(res.votes);
-        toast(res.message);
+      try {
+        const res = await voteHelpful(broker.id);
+        markVoted(broker.id);
+        setVoted(true);
+        if (res.counted) {
+          setVotes(res.votes ?? votes + 1);
+          toast("Counted. Thanks!");
+        } else {
+          if (typeof res.votes === "number") setVotes(res.votes);
+          toast(res.message);
+        }
+      } finally {
+        setVoting(false);
       }
     });
   }
@@ -116,14 +123,26 @@ export function BrokerCard({ broker, waCtx }: Props) {
         <div className="flex shrink-0 gap-1.5">
           <button
             onClick={onHelped}
-            disabled={voted || pending}
+            disabled={voted || voting}
             aria-pressed={voted}
-            title={voted ? "You marked this helpful" : "This helped, upvote"}
+            aria-busy={voting}
+            title={
+              voting
+                ? "Submitting your vote…"
+                : voted
+                  ? "You marked this helpful"
+                  : "This helped, upvote"
+            }
             className={`flex items-center gap-1 rounded-[2px] px-2 py-1 text-xs font-medium transition-colors ${
               voted ? "bg-brand text-white" : "bg-brand-soft text-ink hover:bg-line"
-            }`}
+            } ${voting ? "opacity-70" : ""}`}
           >
-            <IconUpvote size={12} filled={voted} /> {votes}
+            {voting ? (
+              <IconSpinner size={12} />
+            ) : (
+              <IconUpvote size={12} filled={voted} />
+            )}{" "}
+            {votes}
           </button>
           {broker.contactCount > 0 && (
             <span

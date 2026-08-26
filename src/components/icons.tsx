@@ -209,6 +209,19 @@ export function IconPin(props: IconProps) {
   );
 }
 
+export function IconSpinner({ size = 18, className = "", ...props }: IconProps) {
+  return (
+    <Svg
+      {...props}
+      size={size}
+      className={`animate-spin ${className}`}
+      strokeWidth={2}
+    >
+      <path d="M12 2a10 10 0 0 1 10 10" />
+    </Svg>
+  );
+}
+
 export function IconArrowUpRight(props: IconProps) {
   return (
     <Svg {...props}>

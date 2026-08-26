@@ -21,7 +21,6 @@ export interface MergedCard {
   areaSlugs: string[];
   notes: string;
   landmarks: string[];
-  addedBy: number;
   hasNameConflict: boolean;
   budgetMin: number | null;
   budgetMax: number | null;
@@ -191,7 +190,6 @@ export function mergeContacts(rows: ContactRow[]): MergedCard[] {
       areaSlugs,
       notes,
       landmarks,
-      addedBy: group.length,
       hasNameConflict: conflict,
       budgetMin: mins.length ? Math.min(...mins) : null,
       budgetMax: maxs.length ? Math.max(...maxs) : null,

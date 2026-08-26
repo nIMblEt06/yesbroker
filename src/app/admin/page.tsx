@@ -36,7 +36,7 @@ export default async function AdminPage({
 
   const baseSelect = sql`
     select b.id, b.phone, b.display_name,
-           b.notes, b.added_by_count, b.helpful_votes, b.report_count,
+           b.notes, b.helpful_votes, b.report_count,
            b.is_hidden, b.is_deleted, b.has_name_conflict,
            coalesce(jsonb_agg(distinct jsonb_build_object('slug', a.slug, 'name', a.name))
                     filter (where a.id is not null), '[]') as areas
@@ -80,7 +80,7 @@ export default async function AdminPage({
     if (digits.length >= 3) parts.push(`b.phone like ${p("%" + digits + "%")}`);
     const res = await sql.unsafe(
       `select b.id, b.phone, b.display_name,
-              b.notes, b.added_by_count, b.helpful_votes, b.report_count,
+              b.notes, b.helpful_votes, b.report_count,
               b.is_hidden, b.is_deleted, b.has_name_conflict,
               coalesce(jsonb_agg(distinct jsonb_build_object('slug', a.slug, 'name', a.name))
                        filter (where a.id is not null), '[]') as areas
@@ -142,7 +142,6 @@ function mapAdmin(r: RawRow): AdminBrokerRow {
     displayName: (r.display_name as string | null) ?? null,
     aliases: (r.aliases as string[] | null) ?? [],
     notes: (r.notes as string | null) ?? "",
-    addedByCount: Number(r.added_by_count),
     helpfulVotes: Number(r.helpful_votes),
     reportCount: Number(r.report_count),
     isHidden: Boolean(r.is_hidden),

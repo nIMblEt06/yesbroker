@@ -16,7 +16,6 @@ export interface BrokerCardData {
   budgetMax: number | null;
   propertyTags: string[];
   notes: string;
-  addedByCount: number;
   helpfulVotes: number;
   contactCount: number;
   flatsFound: number;
@@ -135,12 +134,12 @@ async function loadBrokers(
   where += qClause(f.q, params, p);
 
   const orderBy =
-    "contact_count desc, flats_found desc, helpful_votes desc, added_by_count desc, id asc";
+    "contact_count desc, flats_found desc, helpful_votes desc, id asc";
 
   const query = `
     select b.id, b.phone, b.display_name, b.aliases, b.firm,
            b.budget_min, b.budget_max, b.property_tags, b.notes,
-       b.added_by_count, b.helpful_votes, b.report_count,
+       b.helpful_votes, b.report_count,
        b.contact_count, b.flats_found,
        b.has_name_conflict, b.first_added_at, b.last_added_at,
            coalesce(jsonb_agg(distinct jsonb_build_object('slug', a.slug, 'name', a.name))
@@ -174,7 +173,6 @@ function mapRow(r: Record<string, unknown>): BrokerCardData {
     budgetMax: (r.budget_max as number | null) ?? null,
     propertyTags: (r.property_tags as string[] | null) ?? [],
     notes: (r.notes as string | null) ?? "",
-    addedByCount: Number(r.added_by_count),
     helpfulVotes: Number(r.helpful_votes),
     contactCount: Number(r.contact_count ?? 0),
     flatsFound: Number(r.flats_found ?? 0),

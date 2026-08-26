@@ -21,7 +21,7 @@ export interface SubmitResult {
   ok: boolean;
   error?: string;
   addedNew?: number;
-  updated?: number;
+  alreadyExisted?: number;
   rejected?: { raw: string; reason: string }[];
   createdAreas?: string[];
   areaNames?: string[];
@@ -61,6 +61,21 @@ async function ensureAreaSlugs(tokens: string[], createdAreas: string[]): Promis
   return slugs;
 }
 
+export async function checkExistingPhones(rawPhones: string[]): Promise<string[]> {
+  const phones = [...new Set((rawPhones ?? []).map(normalizePhone).filter((p): p is string => Boolean(p)))].slice(
+    0,
+    MAX_BATCH
+  );
+  if (phones.length === 0) return [];
+
+  const ipHash = await getIpHash();
+  const { allowed } = await checkRateLimit("check-existing-phones", ipHash, 30, 60);
+  if (!allowed) return [];
+
+  const rows = await sql`select phone from brokers where phone = any(${phones})`;
+  return rows.map((r) => String(r.phone));
+}
+
 export async function submitContacts(
   rawItems: SubmitItem[],
   source: "single" | "bulk"
@@ -72,7 +87,7 @@ export async function submitContacts(
     return { ok: false, error: `Please submit up to ${MAX_BATCH} contacts at a time.` };
   }
   if (rawItems.some((i) => typeof i.company === "string" && i.company.trim() !== "")) {
-    return { ok: true, addedNew: 0, updated: 0 };
+    return { ok: true, addedNew: 0, alreadyExisted: 0 };
   }
 
   const ipHash = await getIpHash();
@@ -114,6 +129,10 @@ export async function submitContacts(
     } catch {
       areaSlugs = [];
     }
+    if (areaSlugs.length === 0) {
+      rejected.push({ raw: String(item.phoneRaw ?? ""), reason: "At least one area is required" });
+      continue;
+    }
     rows.push({
       name,
       phoneRaw: item.phoneRaw,
@@ -137,49 +156,28 @@ export async function submitContacts(
   }
 
   let addedNew = 0;
-  let updated = 0;
+  let alreadyExisted = 0;
   const touchedAreaNames = new Set<string>();
 
   await sql.begin(async (tx) => {
     for (const card of cards) {
       const groupRows = byPhone.get(card.phone) ?? [];
-      const existing = await tx`select id, display_name, notes from brokers where phone = ${card.phone}`;
+      const existing = await tx`select id from brokers where phone = ${card.phone}`;
 
       let brokerId: number;
       if (existing.length === 0) {
         const inserted = await tx`
-          insert into brokers (phone, display_name, aliases, notes, added_by_count)
-          values (${card.phone}, ${card.displayName}, ${card.aliases}, ${card.notes}, ${card.addedBy})
+          insert into brokers (phone, display_name, aliases, notes)
+          values (${card.phone}, ${card.displayName}, ${card.aliases}, ${card.notes})
           returning id
         `;
         brokerId = inserted[0].id;
         addedNew++;
       } else {
-        const cur = existing[0];
-        brokerId = cur.id;
-        const curNotes: string = cur.notes ?? "";
-        let notes = curNotes;
-        if (card.notes) {
-          const segs = card.notes.split(" \u2022 ").map((s) => s.trim()).filter(Boolean);
-          for (const seg of segs) {
-            if (!notes.toLowerCase().includes(seg.toLowerCase())) {
-              notes = notes ? `${notes} \u2022 ${seg}` : seg;
-            }
-          }
-        }
-        const mergedAliases = [...new Set([...card.aliases])];
-        const nextName = cur.display_name ?? card.displayName;
-
-        await tx`
-          update brokers set
-            display_name = ${nextName},
-            aliases = ${mergedAliases},
-            notes = ${notes},
-            added_by_count = added_by_count + ${card.addedBy},
-            last_added_at = now()
-          where id = ${brokerId}
-        `;
-        updated++;
+        // Already in the database \u2014 flagged as pre-existing rather than merged in,
+        // so a resubmitted number isn't treated as a reliability signal.
+        brokerId = existing[0].id;
+        alreadyExisted++;
       }
 
       for (const slug of card.areaSlugs) {
@@ -206,7 +204,7 @@ export async function submitContacts(
   return {
     ok: true,
     addedNew,
-    updated,
+    alreadyExisted,
     rejected,
     createdAreas,
     areaNames: [...touchedAreaNames],

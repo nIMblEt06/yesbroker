@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { TaxonomyArea } from "@/lib/area-taxonomy";
 import { suggestAreas } from "@/lib/areas";
 import { normalizePhone } from "@/lib/phone";
-import { submitContacts } from "@/app/actions/contacts";
+import { checkExistingPhones, submitContacts } from "@/app/actions/contacts";
 import { contactsSupported, pickContacts } from "@/lib/contact-picker";
 import { useToast } from "@/components/Toaster";
 
@@ -253,7 +253,26 @@ function SingleForm({
 
   const phoneValid = Boolean(normalizePhone(phone));
   const nameValid = name.trim().length > 0;
-  const canSubmit = phoneValid && nameValid && selected.length > 0;
+
+  const [existingPhone, setExistingPhone] = useState(false);
+  const canSubmit = phoneValid && nameValid && selected.length > 0 && !existingPhone;
+  useEffect(() => {
+    const norm = normalizePhone(phone);
+    if (!norm) {
+      setExistingPhone(false);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      checkExistingPhones([norm]).then((existing) => {
+        if (!cancelled) setExistingPhone(existing.includes(norm));
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [phone]);
 
   function submit() {
     if (honeypot) {
@@ -281,7 +300,7 @@ function SingleForm({
         toast(res.rejected![0].reason);
         return;
       }
-      toast(res.updated ? "Merged into an existing broker, trust count up!" : "Added, thanks!");
+      toast(res.alreadyExisted ? "Already in the database" : "Added, thanks!");
       setPhone("");
       setName("");
       setNotes("");
@@ -320,11 +339,15 @@ function SingleForm({
           autoFocus
         />
         <p
-          className={`mt-1 h-4 text-xs ${phone ? (phoneValid ? "text-brand-strong" : "text-danger") : "text-muted"}`}
+          className={`mt-1 h-4 text-xs ${
+            phone ? (phoneValid ? (existingPhone ? "text-warn" : "text-brand-strong") : "text-danger") : "text-muted"
+          }`}
         >
           {phone
             ? phoneValid
-              ? `✓ ${normalizePhone(phone)}`
+              ? existingPhone
+                ? `Already in the database · ${normalizePhone(phone)}`
+                : `✓ ${normalizePhone(phone)}`
               : "Enter a 10-digit Indian mobile number"
             : "Required"}
         </p>
@@ -425,6 +448,31 @@ function BulkForm({
   const [honeypot, setHoneypot] = useState("");
   const [pending, startTransition] = useTransition();
   const canPickContacts = useMemo(() => contactsSupported(), []);
+  const [existingPhones, setExistingPhones] = useState<Set<string>>(new Set());
+
+  const validPhones = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const norm = r.phoneRaw ? normalizePhone(r.phoneRaw) : null;
+      if (norm) set.add(norm);
+    }
+    return [...set].sort();
+  }, [rows]);
+
+  useEffect(() => {
+    if (validPhones.length === 0) {
+      setExistingPhones(new Set());
+      return;
+    }
+    let cancelled = false;
+    checkExistingPhones(validPhones).then((existing) => {
+      if (!cancelled) setExistingPhones(new Set(existing));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validPhones.join(",")]);
 
   async function onPickContacts() {
     try {
@@ -464,18 +512,26 @@ function BulkForm({
     setResult(null);
   }
 
+  function isExistingRow(r: BulkRow): boolean {
+    const norm = r.phoneRaw ? normalizePhone(r.phoneRaw) : null;
+    return Boolean(norm && existingPhones.has(norm));
+  }
+
   const validRows = rows.filter(isValidRow);
+  const submittableRows = validRows.filter((r) => !isExistingRow(r));
+  const existingCount = validRows.length - submittableRows.length;
+  const canSubmit = submittableRows.length > 0 && commonAreas.length > 0;
 
   function submitAll() {
     if (honeypot) {
       setResult(
-        `Added ${validRows.length} new contact${validRows.length === 1 ? "" : "s"}`
+        `Added ${submittableRows.length} new contact${submittableRows.length === 1 ? "" : "s"}`
       );
       return;
     }
     startTransition(async () => {
       const res = await submitContacts(
-        validRows.map((r) => ({
+        submittableRows.map((r) => ({
           name: r.name || undefined,
           phoneRaw: r.phoneRaw!,
           areaTokens: commonAreas.map((s) => (s.isNew ? s.label : s.key)),
@@ -490,11 +546,12 @@ function BulkForm({
       const where = res.areaNames?.length ? ` to ${res.areaNames.join(", ")}` : "";
       setResult(
         `Added ${res.addedNew} new contact${res.addedNew === 1 ? "" : "s"}${where}` +
-          (res.updated ? ` · merged ${res.updated} into existing listings` : "") +
+          (res.alreadyExisted ? ` · ${res.alreadyExisted} already in the database` : "") +
           ((res.rejected?.length ?? 0) > 0 ? ` · ${res.rejected!.length} invalid skipped` : "")
       );
       setPaste("");
-      setRows([]);
+      const submittedKeys = new Set(submittableRows.map((r) => r.key));
+      setRows((rs) => rs.filter((r) => !submittedKeys.has(r.key)));
       router.refresh();
     });
   }
@@ -504,7 +561,7 @@ function BulkForm({
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
-        if (validRows.length) submitAll();
+        if (canSubmit) submitAll();
       }}
     >
       <Honeypot value={honeypot} onChange={setHoneypot} />
@@ -536,25 +593,36 @@ function BulkForm({
       {rows.length > 0 && (
         <>
           <div className="rounded-[4px] border border-line p-3">
-            <p className="mb-2 text-sm font-semibold">Apply to all {validRows.length} rows</p>
+            <p className="mb-2 text-sm font-semibold">Apply to all {submittableRows.length} rows</p>
             <AreaPicker areas={areas} selected={commonAreas} onChange={setCommonAreas} />
+            {commonAreas.length === 0 && (
+              <p className="mt-2 text-xs text-warn">Pick at least one area before submitting.</p>
+            )}
           </div>
 
           <div>
             <p className="mb-1.5 flex items-center justify-between text-sm font-semibold">
               Review rows
               <span className="font-normal text-muted">
-                {validRows.length}/{rows.length} valid
+                {submittableRows.length}/{rows.length} valid
+                {existingCount > 0 ? ` · ${existingCount} already in the database` : ""}
               </span>
             </p>
             <div className="max-h-64 space-y-1 overflow-y-auto rounded-[4px] border border-line p-2">
               {rows.map((r) => {
                 const valid = isValidRow(r);
-                const hasNumber = Boolean(r.phoneRaw && normalizePhone(r.phoneRaw));
+                const norm = r.phoneRaw ? normalizePhone(r.phoneRaw) : null;
+                const hasNumber = Boolean(norm);
+                const existing = Boolean(norm && existingPhones.has(norm));
+                const willSubmit = valid && !existing;
                 return (
                   <div key={r.key} className="flex items-center gap-2 rounded-[4px] px-1 py-1 text-sm">
-                    <span>{valid ? "✓" : "⚠"}</span>
-                    <span className={`phone-num w-32 shrink-0 ${hasNumber ? "" : "text-danger line-through"}`}>
+                    <span>{willSubmit ? "✓" : existing ? "⏭" : "⚠"}</span>
+                    <span
+                      className={`phone-num w-32 shrink-0 ${
+                        hasNumber ? (existing ? "text-muted line-through" : "") : "text-danger line-through"
+                      }`}
+                    >
                       {r.phoneRaw ?? r.line.slice(0, 16)}
                     </span>
                     {hasNumber ? (
@@ -564,10 +632,16 @@ function BulkForm({
                           setRows((rs) => rs.map((x) => (x.key === r.key ? { ...x, name: e.target.value } : x)))
                         }
                         placeholder="Add a name"
-                        className={`field h-8 flex-1 py-1 text-sm ${valid ? "" : "border-warn"}`}
+                        disabled={existing}
+                        className={`field h-8 flex-1 py-1 text-sm ${valid ? "" : "border-warn"} ${
+                          existing ? "opacity-50" : ""
+                        }`}
                       />
                     ) : (
                       <span className="flex-1 text-xs text-danger">invalid number, will skip</span>
+                    )}
+                    {existing && (
+                      <span className="tag bg-warn-soft text-warn shrink-0">already in database, will skip</span>
                     )}
                     <button
                       type="button"
@@ -594,10 +668,10 @@ function BulkForm({
 
           <button
             type="submit"
-            disabled={!validRows.length || pending}
+            disabled={!canSubmit || pending}
             className="btn btn-primary w-full disabled:opacity-40"
           >
-            {pending ? "Submitting…" : `Submit all (${validRows.length})`}
+            {pending ? "Submitting…" : `Submit all (${submittableRows.length})`}
           </button>
         </>
       )}

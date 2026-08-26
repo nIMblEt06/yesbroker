@@ -144,14 +144,12 @@ describe("runEtl over fixtures", () => {
 
   it("merges same-phone dual-area rows into one wildcard-named card", () => {
     const dup = card("+919999107707");
-    expect(dup?.addedBy).toBe(2);
     expect(dup?.displayName).toBeNull();
     expect(dup?.areaSlugs.sort()).toEqual(["btm-layout", "j-p-nagar"]);
   });
 
   it("unions areas across sheets for the same phone", () => {
     const basawraj = card("+919663169077");
-    expect(basawraj?.addedBy).toBe(2);
     expect(basawraj?.displayName).toBe("Basawraj");
     expect(basawraj?.areaSlugs.sort()).toEqual(["haralur", "koramangala"]);
   });
@@ -161,7 +159,6 @@ describe("runEtl over fixtures", () => {
     expect(devraj?.hasNameConflict).toBe(true);
     expect(devraj?.displayName).toBe("Manvith");
     expect(devraj?.aliases).toContain("Devraj");
-    expect(devraj?.addedBy).toBe(2);
     expect(devraj?.areaSlugs.sort()).toEqual([
       "cv-raman-nagar",
       "indiranagar",
@@ -212,7 +209,6 @@ describe("structured directory sheet (sheet4)", () => {
 
   it("merges a directory row into an existing phone from sheet1", () => {
     const embassy = card("+916364373100");
-    expect(embassy?.addedBy).toBe(2);
     expect(embassy?.hasNameConflict).toBe(false);
     expect(embassy?.displayName).toBe("Ashiq / Suhair / Lateef");
     expect(embassy?.firm).toBe("Embassy Property Consultant");

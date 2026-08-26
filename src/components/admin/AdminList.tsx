@@ -14,7 +14,6 @@ export interface AdminBrokerRow {
   displayName: string | null;
   aliases: string[];
   notes: string;
-  addedByCount: number;
   helpfulVotes: number;
   reportCount: number;
   isHidden: boolean;
@@ -73,7 +72,6 @@ function AdminRow({
         {row.isHidden && <span className="tag bg-warn-soft text-warn">hidden</span>}
         {row.hasNameConflict && <span className="tag bg-warn-soft text-warn">name conflict</span>}
         <span className="ml-auto flex items-center gap-2 text-xs text-muted">
-          +{row.addedByCount}
           <span className="flex items-center gap-0.5"><IconThumb size={11} />{row.helpfulVotes}</span>
           <span className="flex items-center gap-0.5"><IconFlag size={11} />{row.reportCount}</span>
         </span>

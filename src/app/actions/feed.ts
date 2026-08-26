@@ -14,7 +14,6 @@ export interface SerializedBroker {
   budgetMax: number | null;
   propertyTags: string[];
   notes: string;
-  addedByCount: number;
   helpfulVotes: number;
   contactCount: number;
   flatsFound: number;

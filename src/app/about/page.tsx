@@ -41,7 +41,7 @@ export default function AboutPage() {
           {
             n: "03",
             title: "Pay it forward",
-            body: 'Know a good broker? Add them. Found your flat? Mark "This helped." The more people contribute, the better the list gets.',
+            body: 'Know a good broker? Add them. Had a good experience? Upvote them! Actually found your flat through them? Tell us, that\'s the strongest signal and helps them help others quicker.',
           },
         ].map((s) => (
           <li key={s.n} className="broker-card flex gap-4 p-4">

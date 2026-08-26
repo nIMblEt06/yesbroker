@@ -6,6 +6,7 @@ import {
   type ContactRow,
   type MergedCard,
 } from "./merge";
+import type { TaxonomyArea } from "./area-taxonomy";
 
 export interface Reject {
   raw: string;
@@ -34,7 +35,8 @@ function isDirectorySheet(text: string): boolean {
 
 function extractDirectoryRecords(
   text: string,
-  label: string
+  label: string,
+  areas: TaxonomyArea[]
 ): { records: RawRecord[]; rejects: Reject[]; warnings: Warning[] } {
   const records: RawRecord[] = [];
   const rejects: Reject[] = [];
@@ -62,7 +64,7 @@ function extractDirectoryRecords(
     for (const token of (areaCell ?? "").split("/")) {
       const t = token.trim();
       if (!t) continue;
-      const area = resolveAreaToken(t);
+      const area = resolveAreaToken(areas, t);
       if (area && !slugs.includes(area.slug)) slugs.push(area.slug);
       else if (!area) unresolved.push(t);
     }
@@ -70,7 +72,7 @@ function extractDirectoryRecords(
       warnings.push({
         message: `${label} "${areaCell}": unrecognized area token(s) ${unresolved.map((t) => `"${t}"`).join(", ")}`,
       });
-      for (const s of scanForAreas(areaCell).slugs)
+      for (const s of scanForAreas(areas, areaCell).slugs)
         if (!slugs.includes(s)) slugs.push(s);
     }
 
@@ -137,7 +139,11 @@ export interface EtlResult {
   totalRows: number;
 }
 
-export function runEtl(sheets: Record<string, string | undefined>): EtlResult {
+export function runEtl(
+  sheets: Record<string, string | undefined>,
+  areas: TaxonomyArea[],
+  cityNoiseWords: string[] = []
+): EtlResult {
   const rows: ContactRow[] = [];
   const rejects: Reject[] = [];
   const warnings: Warning[] = [];
@@ -148,7 +154,7 @@ export function runEtl(sheets: Record<string, string | undefined>): EtlResult {
     if (!text) continue;
     const directory = isDirectorySheet(text);
     const parsed = directory
-      ? extractDirectoryRecords(text, key)
+      ? extractDirectoryRecords(text, key, areas)
       : { ...extractRecords(text, key), warnings: [] as Warning[] };
     rejects.push(...parsed.rejects);
     warnings.push(...parsed.warnings);
@@ -157,14 +163,14 @@ export function runEtl(sheets: Record<string, string | undefined>): EtlResult {
       totalRows++;
       const inName = rec.forcedAreaSlugs
         ? { slugs: [], phrases: [] as string[] }
-        : scanNameForAreas(rec.nameText);
+        : scanNameForAreas(areas, rec.nameText);
       const inComments = rec.forcedAreaSlugs
         ? { slugs: [] as string[], phrases: [] as string[] }
-        : scanForAreas(rec.commentText);
+        : scanForAreas(areas, rec.commentText);
       const slugs = [...(rec.forcedAreaSlugs ?? inName.slugs)];
       for (const s of inComments.slugs) if (!slugs.includes(s)) slugs.push(s);
 
-      const cleaned = cleanBrokerName(rec.nameText, inName.phrases);
+      const cleaned = cleanBrokerName(rec.nameText, inName.phrases, cityNoiseWords);
       if (!inName.slugs.length && cleaned.landmarks.length) {
         warnings.push({
           message: `${key} "${rec.nameText}": building-only location (${cleaned.landmarks.join(", ")}) left untagged`,
@@ -195,6 +201,6 @@ export function runEtl(sheets: Record<string, string | undefined>): EtlResult {
     validRows.push(row);
   }
 
-  const cards = mergeContacts(validRows);
+  const cards = mergeContacts(validRows, cityNoiseWords);
   return { cards, rejects, warnings, totalRows };
 }

@@ -3,6 +3,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runEtl } from "../src/lib/etl";
 import { normalizePhone } from "../src/lib/phone";
+import { CURATED_AREAS } from "../src/lib/area-taxonomy";
+import { CITY_NAME_NOISE_WORDS, DEFAULT_CITY_SLUG } from "../src/lib/cities";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const seedDir = join(__dirname, "..", "seed");
@@ -30,7 +32,7 @@ const sheets = Object.fromEntries(
   sheetFiles.map((f) => [f.replace(/\.tsv$/, ""), readFileSync(join(seedDir, f), "utf8")])
 );
 
-const result = runEtl(sheets);
+const result = runEtl(sheets, CURATED_AREAS, CITY_NAME_NOISE_WORDS[DEFAULT_CITY_SLUG] ?? []);
 
 console.log("=== Brokers Age seed import ===");
 console.log(`source rows parsed : ${result.totalRows}`);
@@ -85,11 +87,18 @@ async function main() {
   let enrichedExisting = 0;
   let skippedUnchanged = 0;
 
+  const cityRows = await sql`select id from cities where slug = ${DEFAULT_CITY_SLUG}`;
+  const cityId = cityRows[0]?.id;
+  if (!cityId) {
+    console.error(`No "${DEFAULT_CITY_SLUG}" row in cities — run db:migrate first.`);
+    process.exit(1);
+  }
+
   await sql.begin(async (tx) => {
     for (const [i, card] of result.cards.entries()) {
       const inserted = await tx`
-        insert into brokers (phone, display_name, aliases, firm, budget_min, budget_max, property_tags, notes, added_by_count, has_name_conflict)
-        values (${card.phone}, ${card.displayName}, ${card.aliases}, ${card.firm}, ${card.budgetMin}, ${card.budgetMax}, ${card.propertyTags}, ${card.notes}, ${card.addedBy}, ${card.hasNameConflict})
+        insert into brokers (phone, display_name, aliases, firm, budget_min, budget_max, property_tags, notes, added_by_count, has_name_conflict, city_id)
+        values (${card.phone}, ${card.displayName}, ${card.aliases}, ${card.firm}, ${card.budgetMin}, ${card.budgetMax}, ${card.propertyTags}, ${card.notes}, ${card.addedBy}, ${card.hasNameConflict}, ${cityId})
         on conflict (phone) do nothing
         returning id
       `;
@@ -140,7 +149,7 @@ async function main() {
         for (const slug of card.areaSlugs) {
           await tx`
             insert into broker_areas (broker_id, area_id)
-            select ${brokerId}, id from areas where slug = ${slug}
+            select ${brokerId}, id from areas where slug = ${slug} and city_id = ${cityId}
             on conflict do nothing
           `;
         }
@@ -152,7 +161,7 @@ async function main() {
       for (const slug of card.areaSlugs) {
         await tx`
           insert into broker_areas (broker_id, area_id)
-          select ${brokerId}, id from areas where slug = ${slug}
+          select ${brokerId}, id from areas where slug = ${slug} and city_id = ${cityId}
           on conflict do nothing
         `;
       }

@@ -17,6 +17,7 @@ interface SelectedArea {
 
 interface Props {
   areas: TaxonomyArea[];
+  citySlug: string;
   prefillAreaSlug?: string;
   prefillPhone?: string;
   prefillName?: string;
@@ -24,7 +25,7 @@ interface Props {
   sharedText?: string;
 }
 
-export function AddForms({ areas, prefillAreaSlug, prefillPhone, prefillName, prefillNotes, sharedText }: Props) {
+export function AddForms({ areas, citySlug, prefillAreaSlug, prefillPhone, prefillName, prefillNotes, sharedText }: Props) {
   const areaPrefill: SelectedArea[] = useMemo(() => {
     const found = areas.find((a) => a.slug === prefillAreaSlug);
     return found ? [{ key: found.slug, label: found.name, isNew: false }] : [];
@@ -62,13 +63,19 @@ export function AddForms({ areas, prefillAreaSlug, prefillPhone, prefillName, pr
         {tab === "single" ? (
           <SingleForm
             areas={areas}
+            citySlug={citySlug}
             prefill={areaPrefill}
             initialPhone={prefillPhone ?? sharedSingle?.phone}
             initialName={prefillName ?? sharedSingle?.name}
             initialNotes={prefillNotes}
           />
         ) : (
-          <BulkForm areas={areas} prefill={areaPrefill} initialRows={sharedRows.length > 1 ? sharedRows : undefined} />
+          <BulkForm
+            areas={areas}
+            citySlug={citySlug}
+            prefill={areaPrefill}
+            initialRows={sharedRows.length > 1 ? sharedRows : undefined}
+          />
         )}
       </div>
     </div>
@@ -113,7 +120,7 @@ export function AreaPicker({
   const suggestions = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.trim().toLowerCase();
-    return suggestAreas(query, 5)
+    return suggestAreas(areas, query, 5)
       .filter((a) => !selected.some((s) => s.key === a.slug))
       .concat(
         !areas.some((a) => a.name.toLowerCase() === q) &&
@@ -123,7 +130,7 @@ export function AreaPicker({
       );
   }, [query, selected, areas]);
   const showCustom =
-    query.trim().length > 1 && !suggestAreas(query, 1).some((a) => a.name.toLowerCase() === query.trim().toLowerCase());
+    query.trim().length > 1 && !suggestAreas(areas, query, 1).some((a) => a.name.toLowerCase() === query.trim().toLowerCase());
 
   function add(item: SelectedArea) {
     if (!selected.some((s) => s.key === item.key)) onChange([...selected, item]);
@@ -216,12 +223,14 @@ function Honeypot({ value, onChange }: { value: string; onChange: (v: string) =>
 
 function SingleForm({
   areas,
+  citySlug,
   prefill,
   initialPhone,
   initialName,
   initialNotes,
 }: {
   areas: TaxonomyArea[];
+  citySlug: string;
   prefill: SelectedArea[];
   initialPhone?: string;
   initialName?: string;
@@ -290,7 +299,8 @@ function SingleForm({
             company: honeypot || undefined,
           },
         ],
-        "single"
+        "single",
+        citySlug
       );
       if (!res.ok) {
         toast(res.error ?? "Couldn't add.");
@@ -429,10 +439,12 @@ function isValidRow(r: BulkRow): boolean {
 
 function BulkForm({
   areas,
+  citySlug,
   prefill,
   initialRows,
 }: {
   areas: TaxonomyArea[];
+  citySlug: string;
   prefill: SelectedArea[];
   initialRows?: BulkRow[];
 }) {
@@ -537,7 +549,8 @@ function BulkForm({
           areaTokens: commonAreas.map((s) => (s.isNew ? s.label : s.key)),
           company: honeypot || undefined,
         })),
-        "bulk"
+        "bulk",
+        citySlug
       );
       if (!res.ok) {
         toast(res.error ?? "Couldn't add.");

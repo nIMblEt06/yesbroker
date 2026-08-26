@@ -1,5 +1,7 @@
 import { normalizePhone, phoneDigits } from "./phone";
 
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export interface ContactRow {
   name?: string | null;
   phoneRaw: string;
@@ -44,7 +46,9 @@ export interface CleanedName {
   landmarks: string[];
 }
 
-export function cleanBrokerName(raw: string, areaPhrases: string[]): CleanedName {
+const BASE_NOISE_WORDS = ["broker"];
+
+export function cleanBrokerName(raw: string, areaPhrases: string[], cityNoiseWords: string[] = []): CleanedName {
   let s = raw ?? "";
   const landmarks: string[] = [];
   for (const m of s.matchAll(BUILDING_RE)) landmarks.push(m[0]);
@@ -56,7 +60,8 @@ export function cleanBrokerName(raw: string, areaPhrases: string[]): CleanedName
     );
     s = s.replace(pattern, " ");
   }
-  s = s.replace(/\b(broker|blr|bangalore|banglore)\b/gi, " ");
+  const noiseRe = new RegExp(`\\b(${[...BASE_NOISE_WORDS, ...cityNoiseWords].map(escapeRe).join("|")})\\b`, "gi");
+  s = s.replace(noiseRe, " ");
   s = s.replace(/\b\d+\b/g, " ");
   s = s.replace(/[()]/g, " ");
   s = s.replace(/\s+/g, " ").trim();
@@ -123,7 +128,7 @@ export function mergeNames(names: string[]): {
   return { primary, aliases, conflict: clusters.length > 1 };
 }
 
-export function mergeContacts(rows: ContactRow[]): MergedCard[] {
+export function mergeContacts(rows: ContactRow[], cityNoiseWords: string[] = []): MergedCard[] {
   const groups = new Map<string, ContactRow[]>();
   for (const row of rows) {
     const phone = normalizePhone(row.phoneRaw);
@@ -140,7 +145,7 @@ export function mergeContacts(rows: ContactRow[]): MergedCard[] {
     for (const row of group) {
       const c = row.namePreCleaned
         ? { name: (row.name ?? "").trim() || null, landmarks: [] as string[] }
-        : cleanBrokerName(row.name ?? "", row.nameAreaPhrases ?? []);
+        : cleanBrokerName(row.name ?? "", row.nameAreaPhrases ?? [], cityNoiseWords);
       if (c.name) cleanedNames.push(c.name);
       for (const lm of c.landmarks)
         if (!landmarks.some((x) => x.toLowerCase() === lm.toLowerCase()))

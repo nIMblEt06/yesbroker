@@ -8,6 +8,9 @@ import { normalizePhone } from "@/lib/phone";
 import { resolveAreaToken } from "@/lib/areas";
 import { slugify } from "@/lib/slugify";
 import { mergeContacts, type ContactRow } from "@/lib/merge";
+import { cityBySlug, DEFAULT_CITY_SLUG, CITY_NAME_NOISE_WORDS } from "@/lib/cities";
+import { fetchAreaChips } from "@/lib/queries";
+import type { TaxonomyArea } from "@/lib/area-taxonomy";
 
 export interface SubmitItem {
   name?: string;
@@ -38,21 +41,26 @@ function titleCase(s: string): string {
     .join(" ");
 }
 
-async function ensureAreaSlugs(tokens: string[], createdAreas: string[]): Promise<string[]> {
+async function ensureAreaSlugs(
+  tokens: string[],
+  createdAreas: string[],
+  cityAreas: TaxonomyArea[],
+  cityId: number
+): Promise<string[]> {
   const slugs: string[] = [];
   for (const token of tokens) {
     const t = token.trim();
     if (!t) continue;
-    const curated = resolveAreaToken(t);
+    const curated = resolveAreaToken(cityAreas, t);
     const slug = curated?.slug ?? slugify(t);
     if (!slug || slugs.includes(slug)) continue;
-    const found = await sql`select id, name from areas where slug = ${slug}`;
+    const found = await sql`select id, name from areas where slug = ${slug} and city_id = ${cityId}`;
     if (found.length === 0) {
       const name = curated?.name ?? titleCase(t);
       await sql`
-        insert into areas (name, slug, aliases, kind, source, sort_order)
-        values (${name}, ${slug}, ${[t]}, 'area', 'user', 200)
-        on conflict (slug) do nothing
+        insert into areas (name, slug, aliases, kind, source, sort_order, city_id)
+        values (${name}, ${slug}, ${[t]}, 'area', 'user', 200, ${cityId})
+        on conflict (city_id, slug) do nothing
       `;
       createdAreas.push(name);
     }
@@ -78,11 +86,17 @@ export async function checkExistingPhones(rawPhones: string[]): Promise<string[]
 
 export async function submitContacts(
   rawItems: SubmitItem[],
-  source: "single" | "bulk"
+  source: "single" | "bulk",
+  citySlug: string = DEFAULT_CITY_SLUG
 ): Promise<SubmitResult> {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     return { ok: false, error: "Nothing to add." };
   }
+  const city = await cityBySlug(citySlug);
+  if (!city) return { ok: false, error: "Unknown city." };
+  const cityId = city.id;
+  const cityAreas = await fetchAreaChips(cityId);
+  const cityNoiseWords = CITY_NAME_NOISE_WORDS[citySlug] ?? [];
   if (rawItems.length > MAX_BATCH) {
     return { ok: false, error: `Please submit up to ${MAX_BATCH} contacts at a time.` };
   }
@@ -125,7 +139,7 @@ export async function submitContacts(
     }
     let areaSlugs: string[] = [];
     try {
-      areaSlugs = await ensureAreaSlugs(item.areaTokens ?? [], createdAreas);
+      areaSlugs = await ensureAreaSlugs(item.areaTokens ?? [], createdAreas, cityAreas, cityId);
     } catch {
       areaSlugs = [];
     }
@@ -146,7 +160,7 @@ export async function submitContacts(
     return { ok: false, error: "No valid phone numbers found.", rejected };
   }
 
-  const cards = mergeContacts(rows);
+  const cards = mergeContacts(rows, cityNoiseWords);
   const byPhone = new Map<string, ContactRow[]>();
   for (const row of rows) {
     const p = normalizePhone(row.phoneRaw)!;
@@ -167,8 +181,8 @@ export async function submitContacts(
       let brokerId: number;
       if (existing.length === 0) {
         const inserted = await tx`
-          insert into brokers (phone, display_name, aliases, notes)
-          values (${card.phone}, ${card.displayName}, ${card.aliases}, ${card.notes})
+          insert into brokers (phone, display_name, aliases, notes, city_id)
+          values (${card.phone}, ${card.displayName}, ${card.aliases}, ${card.notes}, ${cityId})
           returning id
         `;
         brokerId = inserted[0].id;
@@ -183,15 +197,15 @@ export async function submitContacts(
       for (const slug of card.areaSlugs) {
         await tx`
           insert into broker_areas (broker_id, area_id)
-          select ${brokerId}, id from areas where slug = ${slug}
+          select ${brokerId}, id from areas where slug = ${slug} and city_id = ${cityId}
           on conflict do nothing
         `;
-        const nm = await tx`select name from areas where slug = ${slug}`;
+        const nm = await tx`select name from areas where slug = ${slug} and city_id = ${cityId}`;
         if (nm.length) touchedAreaNames.add(nm[0].name as string);
       }
 
       for (const row of groupRows) {
-        const areaIdRows = await tx`select id from areas where slug = any(${row.areaSlugs})`;
+        const areaIdRows = await tx`select id from areas where slug = any(${row.areaSlugs}) and city_id = ${cityId}`;
         await tx`
           insert into submissions (broker_id, phone_normalized, name, area_ids, notes, source, ip_hash)
           values (${brokerId}, ${card.phone}, ${row.name ?? null}, ${areaIdRows.map((r: Record<string, unknown>) => Number(r.id))}, ${row.comments || null}, ${source}, ${ipHash})
@@ -201,6 +215,7 @@ export async function submitContacts(
   });
 
   revalidatePath("/");
+  if (citySlug !== DEFAULT_CITY_SLUG) revalidatePath(`/${citySlug}`);
   return {
     ok: true,
     addedNew,

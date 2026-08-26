@@ -44,15 +44,15 @@ function qClause(q: string, params: DbParam[], p: (v: DbParam) => string): strin
   return ` and (${parts.join(" or ")})`;
 }
 
-export async function fetchFacetCounts(q: string): Promise<Record<string, number>> {
-  if (!q.trim()) return cached("facet-counts:empty", 60, () => loadFacetCounts(q));
-  return loadFacetCounts(q);
+export async function fetchFacetCounts(q: string, cityId: number): Promise<Record<string, number>> {
+  if (!q.trim()) return cached(`facet-counts:empty:city=${cityId}`, 60, () => loadFacetCounts(q, cityId));
+  return loadFacetCounts(q, cityId);
 }
 
-async function loadFacetCounts(q: string): Promise<Record<string, number>> {
+async function loadFacetCounts(q: string, cityId: number): Promise<Record<string, number>> {
   const params: DbParam[] = [];
   const p = (v: DbParam) => `$${params.push(v)}`;
-  let where = "b.is_deleted = false and b.is_hidden = false";
+  let where = `b.is_deleted = false and b.is_hidden = false and b.city_id = ${p(cityId)}`;
   where += qClause(q, params, p);
 
   const areaRows = await sql.unsafe(
@@ -71,15 +71,15 @@ async function loadFacetCounts(q: string): Promise<Record<string, number>> {
   return areas;
 }
 
-export async function fetchAreaChips(): Promise<TaxonomyArea[]> {
-  return cached("area-chips", 300, loadAreaChips);
+export async function fetchAreaChips(cityId: number): Promise<TaxonomyArea[]> {
+  return cached(`area-chips:city=${cityId}`, 300, () => loadAreaChips(cityId));
 }
 
-async function loadAreaChips(): Promise<TaxonomyArea[]> {
+async function loadAreaChips(cityId: number): Promise<TaxonomyArea[]> {
   const rows = await sql`
     select name, slug, aliases, kind, sort_order
     from areas
-    where kind = 'area'
+    where kind = 'area' and city_id = ${cityId}
     order by sort_order asc, name asc
   `;
   return rows.map((r) => ({
@@ -92,6 +92,7 @@ async function loadAreaChips(): Promise<TaxonomyArea[]> {
 }
 
 export interface BrokerFilters {
+  cityId: number;
   areaSlugs: string[];
   q: string;
   limit: number;
@@ -103,7 +104,7 @@ export async function fetchBrokers(
 ): Promise<{ brokers: BrokerCardData[]; hasMore: boolean }> {
   const isDefaultView = f.areaSlugs.length === 0 && !f.q.trim() && f.offset === 0;
   if (isDefaultView) {
-    const result = await cached(`brokers:default:limit=${f.limit}`, 30, () => loadBrokers(f));
+    const result = await cached(`brokers:default:city=${f.cityId}:limit=${f.limit}`, 30, () => loadBrokers(f));
     return {
       hasMore: result.hasMore,
       brokers: result.brokers.map((b) => ({
@@ -122,12 +123,12 @@ async function loadBrokers(
   const params: DbParam[] = [];
   const p = (v: DbParam) => `$${params.push(v)}`;
 
-  let where = "b.is_deleted = false and b.is_hidden = false";
+  let where = `b.is_deleted = false and b.is_hidden = false and b.city_id = ${p(f.cityId)}`;
 
   if (f.areaSlugs.length) {
     where += ` and exists (
       select 1 from broker_areas ba join areas a on a.id = ba.area_id
-      where ba.broker_id = b.id and (a.slug = any(${p(f.areaSlugs)}) or a.slug = 'all-bengaluru')
+      where ba.broker_id = b.id and (a.slug = any(${p(f.areaSlugs)}) or (a.kind = 'special' and a.city_id = ${p(f.cityId)}))
     )`;
   }
 

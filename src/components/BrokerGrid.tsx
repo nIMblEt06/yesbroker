@@ -20,6 +20,7 @@ export function BrokerGrid({
   q,
   waAreaNames,
   areaCounts,
+  citySlug,
 }: {
   initial: BrokerCardData[];
   hasMore: boolean;
@@ -27,6 +28,7 @@ export function BrokerGrid({
   q: string;
   waAreaNames: string[];
   areaCounts: Record<string, number>;
+  citySlug: string;
 }) {
   const [brokers, setBrokers] = useState(initial);
   const [hasMore, setHasMore] = useState(hasMoreInitial);
@@ -36,7 +38,7 @@ export function BrokerGrid({
   function loadMore() {
     startTransition(async () => {
       try {
-        const res = await fetchMoreBrokers(areaSlugs, q, brokers.length);
+        const res = await fetchMoreBrokers(areaSlugs, q, brokers.length, citySlug);
         setBrokers((cur) => {
           const seen = new Set(cur.map((b) => b.id));
           return [...cur, ...res.brokers.map(revive).filter((b) => !seen.has(b.id))];

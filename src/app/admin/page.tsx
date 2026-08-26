@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { sql } from "@/lib/db";
 import { adminConfigured, isAdmin } from "@/lib/admin";
 import { fetchAreaChips } from "@/lib/queries";
+import { fetchCities, DEFAULT_CITY_SLUG } from "@/lib/cities";
 import { AdminList, type AdminBrokerRow } from "@/components/admin/AdminList";
 import { LoginForm } from "@/components/admin/LoginForm";
 
@@ -24,6 +25,7 @@ export default async function AdminPage({
   const sp = await searchParams;
   const tab = typeof sp.tab === "string" ? sp.tab : "reports";
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
+  const citySlug = typeof sp.city === "string" ? sp.city : DEFAULT_CITY_SLUG;
 
   if (!adminConfigured()) {
     return (
@@ -33,6 +35,10 @@ export default async function AdminPage({
     );
   }
   if (!(await isAdmin())) return <LoginForm />;
+
+  const cities = await fetchCities();
+  const city = cities.find((c) => c.slug === citySlug) ?? cities[0];
+  const cityId = city?.id ?? 0;
 
   const baseSelect = sql`
     select b.id, b.phone, b.display_name,
@@ -49,11 +55,12 @@ export default async function AdminPage({
   let reportNotes: Record<number, string[]> = {};
 
   if (tab === "reports") {
-    const res = await sql`${baseSelect} where b.report_count > 0 and not b.is_deleted group by b.id order by b.report_count desc limit 200`;
+    const res = await sql`${baseSelect} where b.city_id = ${cityId} and b.report_count > 0 and not b.is_deleted group by b.id order by b.report_count desc limit 200`;
     rows = res.map(mapAdmin);
     const details = await sql`
       select r.broker_id, r.reason, r.note
       from reports r join brokers b on b.id = r.broker_id
+      where b.city_id = ${cityId}
       order by r.created_at desc limit 500
     `;
     reportNotes = details.reduce<Record<number, string[]>>((acc, r) => {
@@ -62,15 +69,15 @@ export default async function AdminPage({
       return acc;
     }, {});
   } else if (tab === "hidden") {
-    const res = await sql`${baseSelect} where b.is_hidden and not b.is_deleted group by b.id order by b.last_added_at desc limit 200`;
+    const res = await sql`${baseSelect} where b.city_id = ${cityId} and b.is_hidden and not b.is_deleted group by b.id order by b.last_added_at desc limit 200`;
     rows = res.map(mapAdmin);
   } else if (tab === "conflicts") {
-    const res = await sql`${baseSelect} where b.has_name_conflict and not b.is_deleted group by b.id order by b.last_added_at desc limit 200`;
+    const res = await sql`${baseSelect} where b.city_id = ${cityId} and b.has_name_conflict and not b.is_deleted group by b.id order by b.last_added_at desc limit 200`;
     rows = res.map(mapAdmin);
   } else if (q) {
     const like = `%${q}%`;
     const digits = q.replace(/\D/g, "");
-    const params: DbParam[] = [];
+    const params: DbParam[] = [cityId];
     const p = (v: DbParam) => `$${params.push(v)}`;
     const parts = [
       `b.display_name ilike ${p(like)}`,
@@ -87,17 +94,17 @@ export default async function AdminPage({
        from brokers b
        left join broker_areas ba on ba.broker_id = b.id
        left join areas a on a.id = ba.area_id
-       where not b.is_deleted and (${parts.join(" or ")})
+       where b.city_id = $1 and not b.is_deleted and (${parts.join(" or ")})
        group by b.id order by b.last_added_at desc limit 200`,
       params
     );
     rows = res.map(mapAdmin);
   } else {
-    const res = await sql`${baseSelect} where not b.is_deleted group by b.id order by b.last_added_at desc limit 200`;
+    const res = await sql`${baseSelect} where b.city_id = ${cityId} and not b.is_deleted group by b.id order by b.last_added_at desc limit 200`;
     rows = res.map(mapAdmin);
   }
 
-  const areas = await fetchAreaChips();
+  const areas = cityId ? await fetchAreaChips(cityId) : [];
 
   return (
     <div className="py-4">
@@ -105,10 +112,26 @@ export default async function AdminPage({
         <h1 className="text-xl font-bold">Moderation</h1>
         <form action="/admin" className="flex gap-2">
           <input type="hidden" name="tab" value="all" />
+          <input type="hidden" name="city" value={citySlug} />
           <input name="q" defaultValue={q} placeholder="Search all brokers…" className="field h-9 w-56 text-sm" />
           <button className="btn btn-outline btn-sm">Search</button>
         </form>
       </div>
+
+      {cities.length > 1 && (
+        <nav className="mt-3 flex flex-wrap gap-1.5">
+          {cities.map((c) => (
+            <a
+              key={c.slug}
+              href={`/admin?tab=${tab}&city=${c.slug}`}
+              className="chip"
+              data-active={citySlug === c.slug}
+            >
+              {c.name}
+            </a>
+          ))}
+        </nav>
+      )}
 
       <nav className="mt-4 flex flex-wrap gap-1.5">
         {(
@@ -121,7 +144,7 @@ export default async function AdminPage({
         ).map(([key, label]) => (
           <a
             key={key}
-            href={`/admin?tab=${key}`}
+            href={`/admin?tab=${key}&city=${citySlug}`}
             className="chip"
             data-active={tab === key || (key === "all" && !["reports", "hidden", "conflicts"].includes(tab))}
           >

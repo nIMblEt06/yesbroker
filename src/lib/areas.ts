@@ -1,4 +1,4 @@
-import { CURATED_AREAS, type TaxonomyArea } from "./area-taxonomy";
+import type { TaxonomyArea } from "./area-taxonomy";
 import { slugify } from "./slugify";
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -18,26 +18,29 @@ interface AreaMatcher {
   re: RegExp;
 }
 
-export const AREA_MATCHERS: AreaMatcher[] = CURATED_AREAS.filter(
-  (a) => a.kind !== "special"
-).flatMap((a) =>
-  [a.name, ...a.aliases].map((label) => ({
-    slug: a.slug,
-    label,
-    re: new RegExp(`\\b${phraseToPattern(label)}\\b`, "i"),
-  }))
-);
+function buildMatchers(areas: TaxonomyArea[]): AreaMatcher[] {
+  return areas
+    .filter((a) => a.kind !== "special")
+    .flatMap((a) =>
+      [a.name, ...a.aliases].map((label) => ({
+        slug: a.slug,
+        label,
+        re: new RegExp(`\\b${phraseToPattern(label)}\\b`, "i"),
+      }))
+    );
+}
 
 export interface AreaScanResult {
   slugs: string[];
   phrases: string[];
 }
 
-export function scanForAreas(...texts: (string | null | undefined)[]): AreaScanResult {
-  const combined = texts.filter(Boolean).join(" \u2022 ");
+export function scanForAreas(areas: TaxonomyArea[], ...texts: (string | null | undefined)[]): AreaScanResult {
+  const combined = texts.filter(Boolean).join(" • ");
+  const matchers = buildMatchers(areas);
   const slugs: string[] = [];
   const phrases: string[] = [];
-  for (const m of AREA_MATCHERS) {
+  for (const m of matchers) {
     if (m.re.test(combined)) {
       if (!slugs.includes(m.slug)) slugs.push(m.slug);
       if (!phrases.some((p) => p.toLowerCase() === m.label.toLowerCase()))
@@ -47,10 +50,11 @@ export function scanForAreas(...texts: (string | null | undefined)[]): AreaScanR
   return { slugs, phrases };
 }
 
-export function scanNameForAreas(name: string): AreaScanResult {
+export function scanNameForAreas(areas: TaxonomyArea[], name: string): AreaScanResult {
+  const matchers = buildMatchers(areas);
   const slugs: string[] = [];
   const phrases: string[] = [];
-  for (const m of AREA_MATCHERS) {
+  for (const m of matchers) {
     if (m.re.test(name)) {
       if (!slugs.includes(m.slug)) slugs.push(m.slug);
       if (!phrases.some((p) => p.toLowerCase() === m.label.toLowerCase()))
@@ -60,25 +64,23 @@ export function scanNameForAreas(name: string): AreaScanResult {
   return { slugs, phrases };
 }
 
-const ALIAS_LOOKUP: Map<string, TaxonomyArea> = new Map();
-for (const a of CURATED_AREAS) {
-  for (const label of [a.name, ...a.aliases]) {
-    ALIAS_LOOKUP.set(slugify(label), a);
-  }
-  if (!ALIAS_LOOKUP.has(a.slug)) ALIAS_LOOKUP.set(a.slug, a);
-}
-
-export function resolveAreaToken(token: string): TaxonomyArea | null {
+export function resolveAreaToken(areas: TaxonomyArea[], token: string): TaxonomyArea | null {
   const key = slugify(token);
   if (!key) return null;
-  return ALIAS_LOOKUP.get(key) ?? null;
+  for (const a of areas) {
+    for (const label of [a.name, ...a.aliases]) {
+      if (slugify(label) === key) return a;
+    }
+    if (a.slug === key) return a;
+  }
+  return null;
 }
 
-export function suggestAreas(query: string, limit = 8): TaxonomyArea[] {
+export function suggestAreas(areas: TaxonomyArea[], query: string, limit = 8): TaxonomyArea[] {
   const q = slugify(query);
-  if (!q) return CURATED_AREAS.filter((a) => a.kind === "area").slice(0, limit);
+  if (!q) return areas.filter((a) => a.kind === "area").slice(0, limit);
   const scored: { area: TaxonomyArea; score: number }[] = [];
-  for (const a of CURATED_AREAS) {
+  for (const a of areas) {
     if (a.kind === "special") continue;
     const labels = [a.name, ...a.aliases].map((l) => slugify(l));
     let best = -1;
@@ -96,6 +98,6 @@ export function suggestAreas(query: string, limit = 8): TaxonomyArea[] {
     .map((s) => s.area);
 }
 
-export function areaBySlug(slug: string): TaxonomyArea | null {
-  return CURATED_AREAS.find((a) => a.slug === slug) ?? null;
+export function areaBySlug(areas: TaxonomyArea[], slug: string): TaxonomyArea | null {
+  return areas.find((a) => a.slug === slug) ?? null;
 }

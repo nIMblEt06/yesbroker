@@ -32,28 +32,32 @@ describe("normalizePhone", () => {
 
 describe("area resolution", () => {
   it("resolves aliases", () => {
-    expect(resolveAreaToken("OMR")?.slug).toBe("old-madras-road");
-    expect(resolveAreaToken("hsr")?.slug).toBe("hsr-layout");
-    expect(resolveAreaToken("Koramangla")?.slug).toBe("koramangala");
-    expect(resolveAreaToken("Indranagar")?.slug).toBe("indiranagar");
-    expect(resolveAreaToken("JP Nagar")?.slug).toBe("j-p-nagar");
-    expect(resolveAreaToken("Old Airport Rd")?.slug).toBe("old-airport-road");
-    expect(resolveAreaToken("HRBR")?.slug).toBe("kalyan-nagar");
-    expect(resolveAreaToken("Kudlu Gate")?.slug).toBe("singasandra");
-    expect(resolveAreaToken("Jayamahal")?.slug).toBe("rt-nagar");
-    expect(resolveAreaToken("Atlantis")).toBeNull();
+    expect(resolveAreaToken(CURATED_AREAS, "OMR")?.slug).toBe("old-madras-road");
+    expect(resolveAreaToken(CURATED_AREAS, "hsr")?.slug).toBe("hsr-layout");
+    expect(resolveAreaToken(CURATED_AREAS, "Koramangla")?.slug).toBe("koramangala");
+    expect(resolveAreaToken(CURATED_AREAS, "Indranagar")?.slug).toBe("indiranagar");
+    expect(resolveAreaToken(CURATED_AREAS, "JP Nagar")?.slug).toBe("j-p-nagar");
+    expect(resolveAreaToken(CURATED_AREAS, "Old Airport Rd")?.slug).toBe("old-airport-road");
+    expect(resolveAreaToken(CURATED_AREAS, "HRBR")?.slug).toBe("kalyan-nagar");
+    expect(resolveAreaToken(CURATED_AREAS, "Kudlu Gate")?.slug).toBe("singasandra");
+    expect(resolveAreaToken(CURATED_AREAS, "Jayamahal")?.slug).toBe("rt-nagar");
+    expect(resolveAreaToken(CURATED_AREAS, "Atlantis")).toBeNull();
   });
   it("suggests by prefix and substring", () => {
-    const s = suggestAreas("indra");
+    const s = suggestAreas(CURATED_AREAS, "indra");
     expect(s[0]?.slug).toBe("indiranagar");
-    expect(suggestAreas("white").some((a) => a.slug === "whitefield")).toBe(true);
+    expect(suggestAreas(CURATED_AREAS, "white").some((a) => a.slug === "whitefield")).toBe(true);
   });
-  it("migration SQL stays in sync with taxonomy", () => {
+  it("Bangalore's seed migrations stay in sync with the taxonomy fixture", () => {
+    // Only migrations that seed the `areas` table for Bangalore — CURATED_AREAS is
+    // a fixture/reference list for Bangalore specifically, not a live cross-city index
+    // (new cities are seeded via scripts/add-city.mts and never touch this file).
     const migrationsDir = join(__dirname, "..", "supabase", "migrations");
     const sql = readdirSync(migrationsDir)
       .filter((f) => f.endsWith(".sql"))
       .sort()
       .map((f) => readFileSync(join(migrationsDir, f), "utf8"))
+      .filter((content) => /insert into areas\b/i.test(content))
       .join("\n");
     const sqlSlugs = [...sql.matchAll(/\('([^']+)',\s*'([a-z0-9-]+)'/g)].map((m) => m[2]);
     const tsSlugs = CURATED_AREAS.map((a) => a.slug);
@@ -79,12 +83,16 @@ describe("mergeNames", () => {
   });
 });
 
-const result = runEtl({
-  sheet1: fixture("sheet1.tsv"),
-  sheet2: fixture("sheet2.tsv"),
-  sheet3: fixture("sheet3.tsv"),
-  sheet4: fixture("sheet4.tsv"),
-});
+const result = runEtl(
+  {
+    sheet1: fixture("sheet1.tsv"),
+    sheet2: fixture("sheet2.tsv"),
+    sheet3: fixture("sheet3.tsv"),
+    sheet4: fixture("sheet4.tsv"),
+  },
+  CURATED_AREAS,
+  ["blr", "bangalore", "banglore"]
+);
 
 function card(phone: string) {
   return result.cards.find((c) => c.phone === phone);

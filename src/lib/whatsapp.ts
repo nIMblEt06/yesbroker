@@ -58,7 +58,7 @@ export function composeMessage(prefs: MsgPrefs): string {
     lines.push(sentence);
     lines.push("Would really appreciate your help with this!");
   } else {
-    lines.push("I'm looking for a rental in Bengaluru.");
+    lines.push("I'm looking for a rental.");
     lines.push("Would love your help finding one!");
   }
 

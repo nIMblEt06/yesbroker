@@ -9,7 +9,8 @@
     "test": "vitest run",
     "db:migrate": "tsx --env-file=.env scripts/migrate.mts",
     "seed:import": "tsx --env-file=.env scripts/import-seed.mts",
-    "seed:dry-run": "tsx --env-file=.env scripts/import-seed.mts"
+    "seed:dry-run": "tsx --env-file=.env scripts/import-seed.mts",
+    "city:add": "tsx --env-file=.env scripts/add-city.mts"
   },
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",

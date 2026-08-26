@@ -79,11 +79,13 @@ export async function saveBrokerEdit(input: BrokerEditInput): Promise<{ ok: bool
         has_name_conflict = false
       where id = ${input.id}
     `;
+    const brokerRow = await tx`select city_id from brokers where id = ${input.id}`;
+    const cityId = Number(brokerRow[0]?.city_id);
     await tx`delete from broker_areas where broker_id = ${input.id}`;
     for (const slug of input.areaSlugs) {
       await tx`
         insert into broker_areas (broker_id, area_id)
-        select ${input.id}, id from areas where slug = ${slug}
+        select ${input.id}, id from areas where slug = ${slug} and city_id = ${cityId}
         on conflict do nothing
       `;
     }
